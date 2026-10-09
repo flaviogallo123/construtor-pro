@@ -12215,7 +12215,7 @@ document.addEventListener('keydown', (e) => {
 
 /* Reaplica depois de qualquer renderização assíncrona do editor. */
 window.addEventListener('load', () => setTimeout(applyResponsiveToMainCanvas, 50));
-if (window.MutationObserver) {
+{
     let sbcResponsiveTimer = null;
     const observer = new MutationObserver(() => {
         clearTimeout(sbcResponsiveTimer);
@@ -12226,6 +12226,113 @@ if (window.MutationObserver) {
         if (canvas) observer.observe(canvas, { childList: true, subtree: true });
     });
 }
+
+// ====================================================================
+// PATCH FINAL DE CORREÇÃO E SINCRONIZAÇÃO (V7)
+// Cole este código EXATAMENTE antes da última tag </script> do arquivo
+// ====================================================================
+(function() {
+    'use strict';
+
+    // 1. RESTAURAÇÃO DE SEGURANÇA: Recria funções essenciais se estiverem faltando
+    if (typeof window.getStorageKey !== 'function') {
+        window.getStorageKey = function() {
+            return 'construtorData_page_' + (typeof PAGE_ID !== 'undefined' ? PAGE_ID : 'default');
+        };
+        console.warn('[Patch] getStorageKey restaurado com sucesso.');
+    }
+
+    if (typeof window.findElementById !== 'function') {
+        window.findElementById = function(elements, id) {
+            if (!elements || !id) return null;
+            for (const el of elements) {
+                if (el.id === id) return el;
+                if (el.children && el.children.length > 0) {
+                    const found = window.findElementById(el.children, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+        console.warn('[Patch] findElementById restaurado com sucesso.');
+    }
+
+    // 2. PERSISTÊNCIA DO MODO RESPONSIVO (Desktop / Tablet / Mobile)
+    const originalSetResponsive = window.setResponsive;
+    if (typeof originalSetResponsive === 'function') {
+        window.setResponsive = function(mode, btn) {
+            originalSetResponsive.apply(this, arguments);
+            try { localStorage.setItem('sbc_responsive_mode', mode); } catch(e) {}
+        };
+    }
+
+    // Restaura o modo ao carregar a página
+    window.addEventListener('load', function() {
+        setTimeout(function() {
+            try {
+                const savedMode = localStorage.getItem('sbc_responsive_mode');
+                if (savedMode && savedMode !== 'desktop') {
+                    const btn = document.querySelector('.responsive-bar button[onclick*="' + savedMode + '"]');
+                    if (btn && !btn.classList.contains('active')) {
+                        btn.click(); // Simula o clique para ativar o modo salvo
+                    }
+                }
+            } catch(e) {}
+        }, 800); // Aguarda o canvas inicializar
+    }, { once: true });
+
+    // 3. SINCRONIZAÇÃO AUTOMÁTICA DO PREVIEW NO MODO CORRETO
+    let __syncTimer = null;
+    const FONT_PROPS = ['fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'titleFontSize', 'descriptionFontSize', 'textFontSize', 'questionFontSize', 'answerFontSize', 'labelFontSize', 'numberFontSize', 'buttonFontSize', 'copyrightFontSize'];
+
+    function shouldSync(prop) {
+        if (!prop) return false;
+        const p = String(prop).toLowerCase();
+        return FONT_PROPS.some(fp => p.includes(fp.toLowerCase()));
+    }
+
+    function schedulePreviewSync() {
+        clearTimeout(__syncTimer);
+        __syncTimer = setTimeout(function() {
+            try {
+                const tab = window.__sbcPreviewTab;
+                if (tab && !tab.closed && typeof window.openPreview === 'function') {
+                    const canvas = document.getElementById('canvas');
+                    const mode = (canvas && canvas.dataset && canvas.dataset.responsiveMode) || 'desktop';
+                    window.openPreview(mode);
+                }
+            } catch(e) {
+                // Silencioso: o preview pode não estar aberto
+            }
+        }, 400); // Delay de 400ms para não travar o navegador enquanto você digita
+    }
+
+    // Intercepta as funções de atualização de estilo de forma 100% segura
+    const functionsToHook = [
+        'updateStyleLive', 'updateStyle', 'setFeaturePartFontSizeLive', 
+        'setPartStyleLive', 'setResponsiveStyleLive', 'setResponsiveStyle'
+    ];
+
+    functionsToHook.forEach(function(fnName) {
+        const original = window[fnName];
+        if (typeof original === 'function') {
+            window[fnName] = function() {
+                // Executa a função original primeiro (preserva todo o comportamento existente)
+                const result = original.apply(this, arguments);
+                
+                // Verifica se a propriedade alterada é relacionada a fontes
+                const prop = String(arguments[1] || arguments[2] || '');
+                if (shouldSync(prop)) {
+                    schedulePreviewSync();
+                }
+                return result;
+            };
+        }
+    });
+
+    console.log('[Construtor Pro] Patch V7 aplicado com sucesso! Editor e Preview sincronizados.');
+})();
+        
 </script>
 <style id="sbc-cards-fluid-responsive-v1">
 /* =========================================================
